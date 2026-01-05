@@ -1,0 +1,74 @@
+{
+	"name": "DuckDuckGo Web Search MCP",
+	"description": "Web search capabilities using DuckDuckGo for LM Studio",
+	"version": "1.0.0",
+	"author": "MCP Agent",
+	"type": "stdio",
+	"server": {
+		"command": "python",
+		"args": [
+			"/workspaces/duckduckgo-mcp-agent/mcp_server.py"
+		],
+		"env": {
+			"MCP_ENVIRONMENT": "production",
+			"MCP_HOST": "0.0.0.0",
+			"MCP_PORT": "8000",
+			"MCP_LOG_LEVEL": "INFO",
+			"MCP_CACHE_ENABLED": "true",
+			"MCP_RATE_LIMIT_ENABLED": "true"
+		}
+	},
+	"capabilities": {
+		"search": {
+			"endpoint": "/search",
+			"method": "POST",
+			"description": "Search the web using DuckDuckGo",
+			"parameters": {
+				"query": {
+					"type": "string",
+					"description": "Search query",
+					"required": true,
+					"minLength": 1,
+					"maxLength": 500
+				},
+				"max_results": {
+					"type": "integer",
+					"description": "Maximum number of results to return",
+					"default": 5,
+					"minimum": 1,
+					"maximum": 20
+				}
+			}
+		},
+		"health": {
+			"endpoint": "/health",
+			"method": "GET",
+			"description": "Health check endpoint"
+		},
+		"readiness": {
+			"endpoint": "/ready",
+			"method": "GET",
+			"description": "Readiness probe - checks DuckDuckGo connectivity"
+		},
+		"metrics": {
+			"endpoint": "/metrics",
+			"method": "GET",
+			"description": "Get server metrics and statistics"
+		}
+	},
+	"connections": {
+		"local": {
+			"url": "http://localhost:8000",
+			"description": "Local development server"
+		},
+		"remote": {
+			"url": "http://127.0.0.1:8000",
+			"description": "Remote server for network access"
+		}
+	},
+	"documentation": {
+		"api_docs": "http://localhost:8000/docs",
+		"redoc": "http://localhost:8000/redoc",
+		"openapi_schema": "http://localhost:8000/openapi.json"
+	}
+}
