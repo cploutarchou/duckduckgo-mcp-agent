@@ -1,0 +1,38 @@
+services:
+  mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mcp-web-search
+    ports:
+      - "8000:8000"
+    environment:
+      - MCP_ENVIRONMENT=production
+      - MCP_LOG_LEVEL=INFO
+      - MCP_LOG_FORMAT=json
+      - MCP_WORKERS=4
+      - MCP_RATE_LIMIT_ENABLED=true
+      - MCP_CACHE_ENABLED=true
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - mcp-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  mcp-network:
+    driver: bridge
