@@ -145,9 +145,9 @@ If connection fails:
 
 2. Check firewall rules (port 8000)
 
-3. For remote access (192.168.68.35):
+3. For remote access (127.0.0.1):
    - Server must be accessible from LM Studio
-   - Update URL to: http://192.168.68.35:8000
+   - Update URL to: http://127.0.0.1:8000
 
 4. Check logs:
    tail -f server.log
