@@ -1,0 +1,323 @@
+#!/usr/bin/env python3
+"""
+MCP HTTP Server with SSE (Server-Sent Events) Support.
+
+Implements the MCP protocol over HTTP using Server-Sent Events for streaming.
+Compatible with LM Studio's HTTP MCP client.
+
+Usage:
+    python mcp_http_sse_server.py
+    # Runs on http://0.0.0.0:8000
+"""
+
+import json
+import logging
+from typing import AsyncGenerator
+
+import uvicorn
+from duckduckgo_search import DDGS
+from fastapi import FastAPI, Request
+from fastapi.responses import Response, StreamingResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Suppress verbose logging from duckduckgo_search library
+logging.getLogger("duckduckgo_search").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("curl_cffi").setLevel(logging.WARNING)
+
+app = FastAPI(
+    title="DuckDuckGo MCP Server",
+    description="MCP server providing DuckDuckGo web search via HTTP with SSE",
+)
+
+
+def create_sse_message(event: str, data: dict) -> str:
+    """Create a Server-Sent Event message."""
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+# Custom exception handler to return SSE format errors
+@app.exception_handler(Exception)
+async def universal_exception_handler(request: Request, exc: Exception):
+    """Handle all exceptions and return SSE format response."""
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+
+    error_message = f"event: error\ndata: {json.dumps({'message': str(exc)})}\n\n"
+
+    return Response(
+        content=error_message,
+        status_code=500,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handle HTTP exceptions and return SSE format response."""
+    logger.error(f"HTTP exception {exc.status_code}: {exc.detail}")
+
+    error_message = (
+        f"event: error\ndata: {json.dumps({'message': str(exc.detail)})}\n\n"
+    )
+
+    return Response(
+        content=error_message,
+        status_code=exc.status_code,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/")
+async def mcp_endpoint(request: Request):
+    """
+    MCP HTTP endpoint - main entry point for LM Studio.
+    Handles all MCP requests via SSE streaming.
+    """
+    # Read request body first before creating generator
+    try:
+        body = await request.json()
+        logger.info(f"Received request body: {body}")
+    except Exception as json_error:
+        logger.error(f"Error parsing JSON: {str(json_error)}", exc_info=True)
+        error_msg = create_sse_message(
+            "error", {"message": f"Invalid JSON: {str(json_error)}"}
+        )
+        return StreamingResponse(
+            iter([error_msg]),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            # Parse MCP request
+            method = body.get("method")
+            params = body.get("params", {})
+            request_id = body.get("id")
+            is_jsonrpc = body.get("jsonrpc") == "2.0"
+
+            logger.info(
+                f"MCP request: {method} with params: {params} (JSON-RPC: {is_jsonrpc}, id: {request_id})"
+            )
+
+            def wrap_response(result):
+                """Wrap response in JSON-RPC format if needed."""
+                if is_jsonrpc and request_id is not None:
+                    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+                return result
+
+            if method == "initialize":
+                # MCP initialization handshake
+                result = {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {"tools": {}, "resources": {}},
+                    "serverInfo": {
+                        "name": "DuckDuckGo Web Search",
+                        "version": "1.0.0",
+                    },
+                }
+                yield create_sse_message("message", wrap_response(result))
+
+            elif method == "resources/list":
+                # MCP resources listing
+                result = {
+                    "resources": [
+                        {
+                            "uri": "mcp://duckduckgo/search",
+                            "name": "DuckDuckGo Search",
+                            "description": "Web search via DuckDuckGo",
+                        }
+                    ]
+                }
+                yield create_sse_message("message", wrap_response(result))
+
+            elif method == "tools/list":
+                # MCP tools listing
+                result = {
+                    "tools": [
+                        {
+                            "name": "web_search",
+                            "description": "Search the web using DuckDuckGo",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {
+                                        "type": "string",
+                                        "description": "The search query",
+                                    },
+                                    "max_results": {
+                                        "type": "integer",
+                                        "description": "Maximum number of results",
+                                        "default": 5,
+                                        "minimum": 1,
+                                        "maximum": 20,
+                                    },
+                                },
+                                "required": ["query"],
+                            },
+                        }
+                    ]
+                }
+                yield create_sse_message("message", wrap_response(result))
+
+            elif method == "notifications/initialized":
+                # LM Studio sends this after initialization - just acknowledge
+                logger.info("Client initialized notification received")
+                # No response needed for notifications (no id)
+
+            elif method == "notifications/cancelled":
+                # LM Studio sends this when aborting a request
+                cancelled_id = params.get("requestId")
+                reason = params.get("reason", "Unknown")
+                logger.warning(f"Request {cancelled_id} was cancelled: {reason}")
+                # No response needed for notifications (no id)
+
+            elif method == "tools/call":
+                # MCP tool calling
+                tool_name = params.get("name")
+                arguments = params.get("arguments", {})
+
+                if tool_name == "web_search":
+                    query = arguments.get("query")
+                    if not query:
+                        if is_jsonrpc and request_id is not None:
+                            yield create_sse_message(
+                                "message",
+                                {
+                                    "jsonrpc": "2.0",
+                                    "id": request_id,
+                                    "error": {
+                                        "code": -32602,
+                                        "message": "query parameter is required",
+                                    },
+                                },
+                            )
+                        else:
+                            yield create_sse_message(
+                                "error", {"message": "query parameter is required"}
+                            )
+                        return
+
+                    max_results = min(int(arguments.get("max_results", 5)), 20)
+
+                    logger.info(f"Searching: {query}")
+
+                    # Perform search
+                    try:
+                        ddgs = DDGS()
+                        results = list(ddgs.text(query, max_results=max_results))
+                    except TypeError as e:
+                        # Handle duckduckgo_search library errors
+                        if "datetime.timedelta" in str(
+                            e
+                        ) or "unsupported format string" in str(e):
+                            logger.warning(
+                                "duckduckgo_search format bug, returning empty results"
+                            )
+                            results = []
+                        else:
+                            raise
+
+                    if not results:
+                        result = {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"No results found for: {query}",
+                                }
+                            ]
+                        }
+                        yield create_sse_message("message", wrap_response(result))
+                    else:
+                        # Format results
+                        formatted = []
+                        for i, result in enumerate(results, 1):
+                            formatted.append(
+                                f"{i}. **{result.get('title', 'No title')}**\n"
+                                f"   URL: {result.get('href', '')}\n"
+                                f"   {result.get('body', '')}"
+                            )
+
+                        response_text = (
+                            f"Found {len(results)} results:\n\n"
+                            + "\n\n".join(formatted)
+                        )
+
+                        result = {"content": [{"type": "text", "text": response_text}]}
+                        yield create_sse_message("message", wrap_response(result))
+                else:
+                    error_result = {"message": f"Unknown tool: {tool_name}"}
+                    if is_jsonrpc and request_id is not None:
+                        yield create_sse_message(
+                            "message",
+                            {
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "error": {
+                                    "code": -32601,
+                                    "message": f"Unknown tool: {tool_name}",
+                                },
+                            },
+                        )
+                    else:
+                        yield create_sse_message("error", error_result)
+
+            elif method is None:
+                error_result = {"message": "No method specified in request"}
+                if is_jsonrpc and request_id is not None:
+                    yield create_sse_message(
+                        "message",
+                        {
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "error": {
+                                "code": -32600,
+                                "message": "No method specified in request",
+                            },
+                        },
+                    )
+                else:
+                    yield create_sse_message("error", error_result)
+            else:
+                error_result = {"message": f"Unknown method: {method}"}
+                if is_jsonrpc and request_id is not None:
+                    yield create_sse_message(
+                        "message",
+                        {
+                            "jsonrpc": "2.0",
+                            "id": request_id,
+                            "error": {
+                                "code": -32601,
+                                "message": f"Unknown method: {method}",
+                            },
+                        },
+                    )
+                else:
+                    yield create_sse_message("error", error_result)
+
+            # Always send completion
+            yield create_sse_message("done", {})
+
+        except Exception as e:
+            logger.error(f"Error in event generator: {str(e)}", exc_info=True)
+            yield create_sse_message("error", {"message": f"Error: {str(e)}"})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
