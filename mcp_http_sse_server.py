@@ -12,7 +12,7 @@ Usage:
 
 import json
 import logging
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Dict
 
 import uvicorn
 from duckduckgo_search import DDGS
@@ -35,7 +35,7 @@ app = FastAPI(
 )
 
 
-def create_sse_message(event: str, data: dict) -> str:
+def create_sse_message(event: str, data: Dict[str, Any]) -> str:
     """Create a Server-Sent Event message."""
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -106,7 +106,7 @@ async def mcp_endpoint(request: Request):
                 f"MCP request: {method} with params: {params} (JSON-RPC: {is_jsonrpc}, id: {request_id})"
             )
 
-            def wrap_response(result):
+            def wrap_response(result: Any) -> Any:
                 """Wrap response in JSON-RPC format if needed."""
                 if is_jsonrpc and request_id is not None:
                     return {"jsonrpc": "2.0", "id": request_id, "result": result}
@@ -114,7 +114,7 @@ async def mcp_endpoint(request: Request):
 
             if method == "initialize":
                 # MCP initialization handshake
-                result = {
+                result: Dict[str, Any] = {
                     "protocolVersion": "2025-06-18",
                     "capabilities": {"tools": {}, "resources": {}},
                     "serverInfo": {
@@ -126,7 +126,7 @@ async def mcp_endpoint(request: Request):
 
             elif method == "resources/list":
                 # MCP resources listing
-                result = {
+                resources_result: Dict[str, Any] = {
                     "resources": [
                         {
                             "uri": "mcp://duckduckgo/search",
@@ -135,11 +135,11 @@ async def mcp_endpoint(request: Request):
                         }
                     ]
                 }
-                yield create_sse_message("message", wrap_response(result))
+                yield create_sse_message("message", wrap_response(resources_result))
 
             elif method == "tools/list":
                 # MCP tools listing
-                result = {
+                tools_result: Dict[str, Any] = {
                     "tools": [
                         {
                             "name": "web_search",
@@ -164,7 +164,7 @@ async def mcp_endpoint(request: Request):
                         }
                     ]
                 }
-                yield create_sse_message("message", wrap_response(result))
+                yield create_sse_message("message", wrap_response(tools_result))
 
             elif method == "notifications/initialized":
                 # LM Studio sends this after initialization - just acknowledge
@@ -225,7 +225,7 @@ async def mcp_endpoint(request: Request):
                             raise
 
                     if not results:
-                        result = {
+                        empty_result: Dict[str, Any] = {
                             "content": [
                                 {
                                     "type": "text",
@@ -233,15 +233,15 @@ async def mcp_endpoint(request: Request):
                                 }
                             ]
                         }
-                        yield create_sse_message("message", wrap_response(result))
+                        yield create_sse_message("message", wrap_response(empty_result))
                     else:
                         # Format results
                         formatted = []
-                        for i, result in enumerate(results, 1):
+                        for i, item in enumerate(results, 1):
                             formatted.append(
-                                f"{i}. **{result.get('title', 'No title')}**\n"
-                                f"   URL: {result.get('href', '')}\n"
-                                f"   {result.get('body', '')}"
+                                f"{i}. **{item.get('title', 'No title')}**\n"
+                                f"   URL: {item.get('href', '')}\n"
+                                f"   {item.get('body', '')}"
                             )
 
                         response_text = (
@@ -249,8 +249,10 @@ async def mcp_endpoint(request: Request):
                             + "\n\n".join(formatted)
                         )
 
-                        result = {"content": [{"type": "text", "text": response_text}]}
-                        yield create_sse_message("message", wrap_response(result))
+                        result_data: Dict[str, Any] = {
+                            "content": [{"type": "text", "text": response_text}]
+                        }
+                        yield create_sse_message("message", wrap_response(result_data))
                 else:
                     error_result = {"message": f"Unknown tool: {tool_name}"}
                     if is_jsonrpc and request_id is not None:
