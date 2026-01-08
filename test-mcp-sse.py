@@ -4,12 +4,13 @@
 import json
 import sys
 import urllib.request
+from typing import Optional
 
 
-def test_mcp_endpoint(method: str, params: dict = None):
+def test_mcp_endpoint(method: str, params: Optional[dict] = None) -> bool:
     """Test an MCP endpoint and print the SSE stream."""
     url = "http://127.0.0.1:8000/"
-    payload = {"method": method}
+    payload: dict = {"method": method}
     if params:
         payload["params"] = params
 
