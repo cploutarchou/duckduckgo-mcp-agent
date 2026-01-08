@@ -1,5 +1,3 @@
-# Makefile for MCP Web Search Agent
-
 .PHONY: help install install-dev run run-dev docker-build docker-run docker-compose test lint format clean
 
 help:
@@ -24,23 +22,35 @@ install-dev:
 	pip install pytest pytest-asyncio httpx black ruff mypy
 
 run:
-	python mcp_server.py
+	python mcp_http_sse_server.py
 
 run-dev:
 	export MCP_DEBUG=true && \
 	export MCP_ENVIRONMENT=development && \
-	uvicorn mcp_server:app --host 0.0.0.0 --port 8000 --reload
+	uvicorn mcp_http_sse_server:app --host 0.0.0.0 --port 8000 --reload
 
 docker-build:
-	docker build -t mcp-web-search:latest .
+	@command -v docker >/dev/null 2>&1 || { echo "❌ Docker is not installed. Please install Docker Desktop for your platform:"; echo "   - Windows: https://docs.docker.com/desktop/install/windows-install/"; echo "   - Linux: https://docs.docker.com/engine/install/ubuntu/"; exit 1; }
+	@if [ -w /var/run/docker.sock ] 2>/dev/null || docker ps >/dev/null 2>&1; then \
+		docker build -t mcp-web-search:latest .; \
+	else \
+		echo "❌ Docker daemon not accessible. Try one of these:"; \
+		echo "   Linux: Add your user to docker group: sudo usermod -aG docker \$$USER"; \
+		echo "   Or run: sudo make docker-build"; \
+		exit 1; \
+	fi
 
 docker-run:
+	@command -v docker >/dev/null 2>&1 || { echo "❌ Docker is not installed"; exit 1; }
+	@docker ps >/dev/null 2>&1 || { echo "❌ Docker daemon not accessible"; exit 1; }
 	docker run -p 8000:8000 --env-file .env mcp-web-search:latest
 
 docker-compose:
+	@command -v docker-compose >/dev/null 2>&1 || { echo "❌ Docker Compose is not installed"; exit 1; }
 	docker-compose up -d
 
 docker-compose-down:
+	@command -v docker-compose >/dev/null 2>&1 || { echo "❌ Docker Compose is not installed"; exit 1; }
 	docker-compose down
 
 test:
@@ -48,7 +58,7 @@ test:
 
 lint:
 	ruff check .
-	mypy mcp_server.py
+	mypy mcp_http_sse_server.py
 
 format:
 	black .
