@@ -35,9 +35,12 @@ MAX_ALL_RESULTS_CAP = 100  # cap used when all_results=true
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Suppress verbose logging from duckduckgo_search library
+# Suppress verbose logging from DuckDuckGo and HTTP libraries
 logging.getLogger("duckduckgo_search").setLevel(logging.WARNING)
+logging.getLogger("ddgs").setLevel(logging.WARNING)
+logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("primp").setLevel(logging.WARNING)
 logging.getLogger("curl_cffi").setLevel(logging.WARNING)
 
 app = FastAPI(
@@ -298,6 +301,18 @@ async def mcp_endpoint(request: Request):
                             )
                             raw_results = []
                         else:
+                            raise
+                    except (ConnectionError, OSError, Exception) as e:
+                        # Handle network/DNS errors gracefully
+                        # Common in containerized or restricted network environments
+                        error_str = str(e).lower()
+                        if any(x in error_str for x in ["dns", "connection", "timeout", "refused", "unreachable"]):
+                            logger.warning(
+                                f"Network/DNS error during search (expected in some environments): {type(e).__name__}"
+                            )
+                            raw_results = []
+                        else:
+                            # Re-raise unexpected errors
                             raise
 
                     # Filter and deduplicate results
