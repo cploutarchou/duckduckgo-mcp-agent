@@ -20,6 +20,9 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+# Application version
+APP_VERSION = "1.1.0"
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -119,7 +122,7 @@ async def mcp_endpoint(request: Request):
                     "capabilities": {"tools": {}, "resources": {}},
                     "serverInfo": {
                         "name": "DuckDuckGo Web Search",
-                        "version": "1.0.0",
+                        "version": APP_VERSION,
                     },
                 }
                 yield create_sse_message("message", wrap_response(result))
@@ -153,10 +156,26 @@ async def mcp_endpoint(request: Request):
                                     },
                                     "max_results": {
                                         "type": "integer",
-                                        "description": "Maximum number of results",
+                                        "description": "Maximum number of results (capped at 20)",
                                         "default": 5,
                                         "minimum": 1,
                                         "maximum": 20,
+                                    },
+                                    "region": {
+                                        "type": "string",
+                                        "description": "Search region, e.g., wt-wt (global), us-en, uk-en",
+                                        "default": "wt-wt",
+                                    },
+                                    "safesearch": {
+                                        "type": "string",
+                                        "description": "SafeSearch level: off | moderate | strict",
+                                        "default": "moderate",
+                                        "enum": ["off", "moderate", "strict"],
+                                    },
+                                    "timelimit": {
+                                        "type": "string",
+                                        "description": "Time limit for results: d (day), w (week), m (month), y (year)",
+                                        "enum": ["d", "w", "m", "y"],
                                     },
                                 },
                                 "required": ["query"],
@@ -206,17 +225,54 @@ async def mcp_endpoint(request: Request):
 
                     max_results = min(int(arguments.get("max_results", 5)), 20)
 
-                    logger.info(f"Searching: {query}")
+                    # Optional tuning parameters with sane defaults/validation
+                    region = str(arguments.get("region", "wt-wt")).strip() or "wt-wt"
+                    safesearch = str(
+                        arguments.get("safesearch", "moderate")
+                    ).lower()
+                    if safesearch not in {"off", "moderate", "strict"}:
+                        safesearch = "moderate"
+                    timelimit = arguments.get("timelimit")
+                    if timelimit is not None:
+                        timelimit = str(timelimit).lower()
+                        if timelimit not in {"d", "w", "m", "y"}:
+                            timelimit = None
+
+                    logger.info(
+                        f"Searching: {query} (max_results={max_results}, region={region}, safesearch={safesearch}, timelimit={timelimit})"
+                    )
 
                     # Perform search
                     try:
                         ddgs = DDGS()
-                        results = list(ddgs.text(query, max_results=max_results))
+                        # First try with enhanced parameters
+                        try:
+                            results_iter = ddgs.text(
+                                query,
+                                region=region,
+                                safesearch=safesearch,
+                                timelimit=timelimit,
+                                max_results=max_results,
+                            )
+                            results = list(results_iter)
+                        except TypeError as e:
+                            # If library signature differs (unexpected kwargs), fallback to minimal call
+                            if "unexpected keyword" in str(e) or "got an unexpected keyword argument" in str(e):
+                                logger.warning(
+                                    "duckduckgo_search param mismatch; falling back to default call"
+                                )
+                                results = list(ddgs.text(query, max_results=max_results))
+                            # Handle duckduckgo_search library format errors
+                            elif "datetime.timedelta" in str(e) or "unsupported format string" in str(e):
+                                logger.warning(
+                                    "duckduckgo_search format bug, returning empty results"
+                                )
+                                results = []
+                            else:
+                                raise
                     except TypeError as e:
-                        # Handle duckduckgo_search library errors
-                        if "datetime.timedelta" in str(
-                            e
-                        ) or "unsupported format string" in str(e):
+                        # Outer guard for known library issues
+                        if "datetime.timedelta" in str(e) or "unsupported format string" in str(e):
                             logger.warning(
                                 "duckduckgo_search format bug, returning empty results"
                             )
@@ -235,18 +291,20 @@ async def mcp_endpoint(request: Request):
                         }
                         yield create_sse_message("message", wrap_response(empty_result))
                     else:
-                        # Format results
-                        formatted = []
+                        # Format results as Markdown list with links
+                        lines = []
                         for i, item in enumerate(results, 1):
-                            formatted.append(
-                                f"{i}. **{item.get('title', 'No title')}**\n"
-                                f"   URL: {item.get('href', '')}\n"
-                                f"   {item.get('body', '')}"
-                            )
+                            title = item.get("title", "No title")
+                            href = item.get("href", "")
+                            body = item.get("body", "")
+                            if href:
+                                line = f"{i}. [{title}]({href})\n   {body}"
+                            else:
+                                line = f"{i}. {title}\n   {body}"
+                            lines.append(line)
 
                         response_text = (
-                            f"Found {len(results)} results:\n\n"
-                            + "\n\n".join(formatted)
+                            f"Found {len(results)} results:\n\n" + "\n\n".join(lines)
                         )
 
                         result_data: Dict[str, Any] = {
