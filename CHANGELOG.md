@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - Clean extra whitespace in result text
 - **Suppress verbose INFO logs from ddgs, primp, httpx libraries** (reduces log noise)
 - **Improve network/DNS error handling** (gracefully handle connectivity issues in containerized environments)
+- **Reduce log verbosity for request cancellations** (normal client operations, not errors)
 
 ### Changed
 - Enhanced search result response header with query display
