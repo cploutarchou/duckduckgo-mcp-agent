@@ -210,7 +210,7 @@ async def mcp_endpoint(request: Request):
                 # LM Studio sends this when aborting a request
                 cancelled_id = params.get("requestId")
                 reason = params.get("reason", "Unknown")
-                logger.warning(f"Request {cancelled_id} was cancelled: {reason}")
+                logger.debug(f"Request {cancelled_id} was cancelled: {reason}")
                 # No response needed for notifications (no id)
 
             elif method == "tools/call":
