@@ -178,8 +178,8 @@ data: {}
 ### Search Tool
 - Input:
   - `query` (string, required)
-  - `max_results` (int, 1-20, default 5). Ignored when `all_results` is true.
-  - `all_results` (boolean, default false): fetch as many results as possible (uses an internal cap to protect against overload)
+  - `max_results` (int, 1-10, default 5). Ignored when `all_results` is true.
+  - `all_results` (boolean, default false): fetch maximum results (capped at 10)
   - `region` (string, default `wt-wt`)
   - `safesearch` (string enum: `off|moderate|strict`, default `moderate`)
   - `timelimit` (string enum: `d|w|m|y`, optional)
