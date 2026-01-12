@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1] - 2026-01-12
+### Added
+- Result deduplication to eliminate duplicate URLs
+- Domain extraction for each result (📍 indicator)
+- Improved result formatting with better Markdown presentation
+
+### Fixed
+- Filter out results with missing titles or snippets
+- Truncate long snippets to 200 characters for readability
+- Clean extra whitespace in result text
+
+### Changed
+- Enhanced search result response header with query display
+
+---
+
 ## [1.2.0] - 2026-01-12
 ### Added
 - `all_results` flag for `web_search` to fetch larger result sets (internal safety cap of 100).

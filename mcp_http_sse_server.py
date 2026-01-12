@@ -13,6 +13,7 @@ Usage:
 import json
 import logging
 from typing import Any, AsyncGenerator, Dict
+from urllib.parse import urlparse
 
 import uvicorn
 try:
@@ -24,7 +25,7 @@ from fastapi.responses import Response, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Application version
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 
 # Result caps
 MAX_RESULTS_CAP = 20  # default safety cap
@@ -273,20 +274,20 @@ async def mcp_endpoint(request: Request):
                                 timelimit=timelimit,
                                 max_results=effective_max,
                             )
-                            results = list(results_iter)
+                            raw_results = list(results_iter)
                         except TypeError as e:
                             # If library signature differs (unexpected kwargs), fallback to minimal call
                             if "unexpected keyword" in str(e) or "got an unexpected keyword argument" in str(e):
                                 logger.warning(
                                     "duckduckgo_search param mismatch; falling back to default call"
                                 )
-                                results = list(ddgs.text(query, max_results=effective_max))
+                                raw_results = list(ddgs.text(query, max_results=effective_max))
                             # Handle duckduckgo_search library format errors
                             elif "datetime.timedelta" in str(e) or "unsupported format string" in str(e):
                                 logger.warning(
                                     "duckduckgo_search format bug, returning empty results"
                                 )
-                                results = []
+                                raw_results = []
                             else:
                                 raise
                     except TypeError as e:
@@ -295,9 +296,30 @@ async def mcp_endpoint(request: Request):
                             logger.warning(
                                 "duckduckgo_search format bug, returning empty results"
                             )
-                            results = []
+                            raw_results = []
                         else:
                             raise
+
+                    # Filter and deduplicate results
+                    seen_hrefs = set()
+                    results = []
+                    for item in raw_results:
+                        href = item.get("href", "").strip()
+                        title = item.get("title", "").strip()
+                        body = item.get("body", "").strip()
+
+                        # Skip results without titles or bodies
+                        if not title or not body:
+                            continue
+
+                        # Skip duplicates (by URL)
+                        if href and href in seen_hrefs:
+                            continue
+
+                        if href:
+                            seen_hrefs.add(href)
+
+                        results.append(item)
 
                     if not results:
                         empty_result: Dict[str, Any] = {
@@ -310,20 +332,35 @@ async def mcp_endpoint(request: Request):
                         }
                         yield create_sse_message("message", wrap_response(empty_result))
                     else:
-                        # Format results as Markdown list with links
+                        # Format results as rich Markdown with improved presentation
                         lines = []
                         for i, item in enumerate(results, 1):
-                            title = item.get("title", "No title")
-                            href = item.get("href", "")
-                            body = item.get("body", "")
+                            title = item.get("title", "No title").strip()
+                            href = item.get("href", "").strip()
+                            body = item.get("body", "").strip()
+
+                            # Clean up body: remove extra whitespace, truncate long snippets
+                            body = " ".join(body.split())
+                            if len(body) > 200:
+                                body = body[:197] + "..."
+
+                            # Build enhanced result entry
                             if href:
-                                line = f"{i}. [{title}]({href})\n   {body}"
+                                # Link with domain hint for better context
+                                try:
+                                    domain = urlparse(href).netloc or "link"
+                                except Exception:
+                                    domain = "link"
+                                line = f"**{i}. [{title}]({href})**\n   📍 {domain}\n   {body}"
                             else:
-                                line = f"{i}. {title}\n   {body}"
+                                line = f"**{i}. {title}**\n   {body}"
                             lines.append(line)
 
+                        # Build summary header
                         response_text = (
-                            f"Found {len(results)} results:\n\n" + "\n\n".join(lines)
+                            f"## Search Results for: _{query}_\n"
+                            f"**Found {len(results)} result{'s' if len(results) != 1 else ''}**\n\n"
+                            + "\n\n".join(lines)
                         )
 
                         result_data: Dict[str, Any] = {
