@@ -12,6 +12,8 @@ All notable changes to this project will be documented in this file.
 - Filter out results with missing titles or snippets
 - Truncate long snippets to 200 characters for readability
 - Clean extra whitespace in result text
+- **Suppress verbose INFO logs from ddgs, primp, httpx libraries** (reduces log noise)
+- **Improve network/DNS error handling** (gracefully handle connectivity issues in containerized environments)
 
 ### Changed
 - Enhanced search result response header with query display
