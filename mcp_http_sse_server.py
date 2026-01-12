@@ -15,13 +15,20 @@ import logging
 from typing import Any, AsyncGenerator, Dict
 
 import uvicorn
-from duckduckgo_search import DDGS
+try:
+    from ddgs import DDGS  # preferred new package name
+except Exception:  # pragma: no cover - fallback when ddgs not available
+    from duckduckgo_search import DDGS  # legacy package name
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, StreamingResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Application version
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
+
+# Result caps
+MAX_RESULTS_CAP = 20  # default safety cap
+MAX_ALL_RESULTS_CAP = 100  # cap used when all_results=true
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -97,7 +104,7 @@ async def mcp_endpoint(request: Request):
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
-    async def event_generator() -> AsyncGenerator[str, None]:
+    async def event_generator(body=body) -> AsyncGenerator[str, None]:
         try:
             # Parse MCP request
             method = body.get("method")
@@ -156,10 +163,15 @@ async def mcp_endpoint(request: Request):
                                     },
                                     "max_results": {
                                         "type": "integer",
-                                        "description": "Maximum number of results (capped at 20)",
+                                        "description": "Maximum number of results (capped at 20 by default)",
                                         "default": 5,
                                         "minimum": 1,
-                                        "maximum": 20,
+                                        "maximum": MAX_RESULTS_CAP,
+                                    },
+                                    "all_results": {
+                                        "type": "boolean",
+                                        "description": "Fetch as many results as available (uses an internal safety cap)",
+                                        "default": False,
                                     },
                                     "region": {
                                         "type": "string",
@@ -223,13 +235,20 @@ async def mcp_endpoint(request: Request):
                             )
                         return
 
-                    max_results = min(int(arguments.get("max_results", 5)), 20)
+                    # Determine effective max results
+                    all_results = bool(arguments.get("all_results", False))
+                    if all_results:
+                        effective_max = MAX_ALL_RESULTS_CAP
+                    else:
+                        try:
+                            requested = int(arguments.get("max_results", 5))
+                        except Exception:
+                            requested = 5
+                        effective_max = max(1, min(requested, MAX_RESULTS_CAP))
 
                     # Optional tuning parameters with sane defaults/validation
                     region = str(arguments.get("region", "wt-wt")).strip() or "wt-wt"
-                    safesearch = str(
-                        arguments.get("safesearch", "moderate")
-                    ).lower()
+                    safesearch = str(arguments.get("safesearch", "moderate")).lower()
                     if safesearch not in {"off", "moderate", "strict"}:
                         safesearch = "moderate"
                     timelimit = arguments.get("timelimit")
@@ -239,7 +258,7 @@ async def mcp_endpoint(request: Request):
                             timelimit = None
 
                     logger.info(
-                        f"Searching: {query} (max_results={max_results}, region={region}, safesearch={safesearch}, timelimit={timelimit})"
+                        f"Searching: {query} (effective_max={effective_max}, all_results={all_results}, region={region}, safesearch={safesearch}, timelimit={timelimit})"
                     )
 
                     # Perform search
@@ -252,7 +271,7 @@ async def mcp_endpoint(request: Request):
                                 region=region,
                                 safesearch=safesearch,
                                 timelimit=timelimit,
-                                max_results=max_results,
+                                max_results=effective_max,
                             )
                             results = list(results_iter)
                         except TypeError as e:
@@ -261,7 +280,7 @@ async def mcp_endpoint(request: Request):
                                 logger.warning(
                                     "duckduckgo_search param mismatch; falling back to default call"
                                 )
-                                results = list(ddgs.text(query, max_results=max_results))
+                                results = list(ddgs.text(query, max_results=effective_max))
                             # Handle duckduckgo_search library format errors
                             elif "datetime.timedelta" in str(e) or "unsupported format string" in str(e):
                                 logger.warning(

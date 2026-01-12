@@ -50,7 +50,7 @@ curl -X POST http://localhost:8000/ \
     "method": "tools/call",
     "params": {
       "name": "web_search",
-      "arguments": {"query": "Python async", "max_results": 5, "region": "us-en", "safesearch": "moderate", "timelimit": "w"}
+      "arguments": {"query": "Python async", "all_results": true, "region": "us-en", "safesearch": "moderate", "timelimit": "w"}
     }
   }'
 ```
@@ -74,7 +74,7 @@ curl -X POST http://localhost:8000/ \
   "id": 3,
   "params": {
     "name": "web_search",
-    "arguments": {"query": "your query", "max_results": 5, "region": "wt-wt", "safesearch": "moderate"}
+    "arguments": {"query": "your query", "max_results": 5, "all_results": false, "region": "wt-wt", "safesearch": "moderate"}
   }
 }
 ```
@@ -178,7 +178,8 @@ data: {}
 ### Search Tool
 - Input:
   - `query` (string, required)
-  - `max_results` (int, 1-20, default 5)
+  - `max_results` (int, 1-20, default 5). Ignored when `all_results` is true.
+  - `all_results` (boolean, default false): fetch as many results as possible (uses an internal cap to protect against overload)
   - `region` (string, default `wt-wt`)
   - `safesearch` (string enum: `off|moderate|strict`, default `moderate`)
   - `timelimit` (string enum: `d|w|m|y`, optional)
@@ -205,6 +206,7 @@ Keep this project minimal:
 
 ## Changelog
 
+- 1.2.0: Add `all_results` flag (internal cap 100) to support larger result sets; bump version and docs.
 - 1.1.0: Improved DuckDuckGo search with region/safesearch/timelimit parameters; better markdown formatting; version surfaced in initialize.
 
 ## License
