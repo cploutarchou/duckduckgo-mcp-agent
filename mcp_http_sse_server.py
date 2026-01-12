@@ -28,8 +28,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 APP_VERSION = "1.2.1"
 
 # Result caps
-MAX_RESULTS_CAP = 20  # default safety cap
-MAX_ALL_RESULTS_CAP = 100  # cap used when all_results=true
+MAX_RESULTS_CAP = 10  # default safety cap
+MAX_ALL_RESULTS_CAP = 10  # cap used when all_results=true
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -167,14 +167,14 @@ async def mcp_endpoint(request: Request):
                                     },
                                     "max_results": {
                                         "type": "integer",
-                                        "description": "Maximum number of results (capped at 20 by default)",
+                                        "description": "Maximum number of results (capped at 10)",
                                         "default": 5,
                                         "minimum": 1,
                                         "maximum": MAX_RESULTS_CAP,
                                     },
                                     "all_results": {
                                         "type": "boolean",
-                                        "description": "Fetch as many results as available (uses an internal safety cap)",
+                                        "description": "Fetch maximum results (capped at 10)",
                                         "default": False,
                                     },
                                     "region": {

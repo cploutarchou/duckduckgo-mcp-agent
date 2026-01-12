@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Enhanced search result response header with query display
+- **Limit maximum results to 10 per search** (for better performance and readability)
 
 ---
 
